@@ -15,12 +15,14 @@ class Bot
     public $reg;
     public $pool;
     public $hwid;
+    public $api;
 
     public function __construct($key, $i18n)
     {
+        $api = getenv('TELEGRAM_API');
         $this->key      = $key;
-        $this->api      = "https://api.telegram.org/bot$key/";
-        $this->file     = "https://api.telegram.org/file/bot$key/";
+        $this->api      = "https://$api/bot$key/";
+        $this->file     = "https://$api/file/bot$key/";
         $this->clients  = '/config/clients.json';
         $this->clients1 = '/config/clients1.json';
         $this->pac      = '/config/pac.json';
@@ -46,9 +48,9 @@ class Bot
         ]) . '~';
     }
 
-    public function input()
+    public function input($data = false)
     {
-        $this->input_raw = $input = json_decode(file_get_contents('php://input'), true);
+        $this->input_raw = $input = $data ?: json_decode(file_get_contents('php://input'), true);
         $this->input     = [
             'message'           => $input['callback_query']['message']['text'] ?? $input['message']['text'] ?? $input['channel_post']['text'] ?? '',
             'message_id'        => $input['callback_query']['message']['message_id'] ?? $input['message']['message_id'] ?? $input['channel_post']['message_id'],
@@ -9698,22 +9700,32 @@ DNS-over-HTTPS with IP:
         return $r;
     }
 
-    public function setwebhook()
+    public function polling()
     {
-        $ip = $this->ip;
-        if (empty($ip)) {
-            die('нет айпи');
-        }
-        echo "$ip\n";
-        var_dump($r = $this->request('setWebhook', [
-            'url'             => "https://$ip/tlgrm?k={$this->key}",
-            'certificate'     => curl_file_create('/certs/self_public'),
-            'allowed_updates' => json_encode(['*']),
-        ]));
-        if (!empty($r['result']) && $r['result'] == true) {
+        $offset = -1;
+        while (true) {
+            $r = $this->request('getUpdates', [
+                'offset'  => $offset,
+                'limit'   => 3,
+                'timeout' => 5,
+            ]);
+            if (!empty($r['description'])) {
+                error_log('getUpdates error: ' . $r['description']);
+                sleep(3);
+                continue;
+            }
             file_put_contents('/start', 1);
-        } else {
-            die("set webhook fail\n");
+            if (!empty($r['result'])) {
+                foreach ($r['result'] as $v) {
+                    try {
+                        $this->input($v);
+                    } catch (Throwable $e) {
+                        var_dump('error:', $e);
+                    }
+                    $offset = max($offset, $v['update_id']);
+                }
+                $offset++;
+            }
         }
     }
 
